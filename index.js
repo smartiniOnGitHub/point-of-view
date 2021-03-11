@@ -25,6 +25,7 @@ function fastifyView (fastify, opts, next) {
   }
 
   const charset = opts.charset || 'utf-8'
+  const propertyName = opts.propertyName || 'view'
   const engine = opts.engine[type]
   const options = opts.options || {}
   const templatesDir = opts.root || resolve(opts.templates || './')
@@ -35,12 +36,12 @@ function fastifyView (fastify, opts, next) {
   const defaultCtx = opts.defaultContext || {}
   const layoutFileName = opts.layout
 
-  if (layoutFileName && type !== 'handlebars' && type !== 'ejs' && type !== 'eta') {
-    next(new Error('Only Handlebars, EJS, and Eta support the "layout" option'))
+  if (layoutFileName && type !== 'dot' && type !== 'handlebars' && type !== 'ejs' && type !== 'eta') {
+    next(new Error('Only Dot, Handlebars, EJS, and Eta support the "layout" option'))
     return
   }
 
-  if (layoutFileName && !hasAccessToLayoutFile(layoutFileName)) {
+  if (layoutFileName && !hasAccessToLayoutFile(layoutFileName + ((type === 'dot') ? '.dot' : ''))) {
     next(new Error(`unable to access template "${layoutFileName}"`))
     return
   }
@@ -56,7 +57,7 @@ function fastifyView (fastify, opts, next) {
     'art-template': viewArtTemplate,
     twig: viewTwig,
     liquid: viewLiquid,
-    dot: dotRender,
+    dot: withLayout(dotRender),
     eta: withLayout(viewEta),
     _default: view
   }
@@ -98,9 +99,9 @@ function fastifyView (fastify, opts, next) {
     lru.clear()
   }
 
-  fastify.decorate('view', viewDecorator)
+  fastify.decorate(propertyName, viewDecorator)
 
-  fastify.decorateReply('view', function () {
+  fastify.decorateReply(propertyName, function () {
     renderer.apply(this, arguments)
     return this
   })
@@ -182,6 +183,13 @@ function fastifyView (fastify, opts, next) {
 
       let compiledPage
       try {
+        if ((type === 'ejs') && viewExt && !options.includer) {
+          options.includer = (originalPath, parsedPath) => {
+            return {
+              filename: parsedPath || join(templatesDir, originalPath + '.' + viewExt)
+            }
+          }
+        }
         options.filename = join(templatesDir, page)
         compiledPage = engine.compile(html, options)
       } catch (error) {
@@ -575,6 +583,8 @@ function fastifyView (fastify, opts, next) {
     if (layoutFileName) {
       return function (page, data, opts) {
         const that = this
+
+        data = Object.assign({}, defaultCtx, this.locals, data)
 
         render.call({
           getHeader: () => { },
